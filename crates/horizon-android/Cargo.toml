@@ -12,7 +12,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 horizon-core = { path = "../horizon-core" }
 horizon-client-core = { path = "../horizon-client-core" }
-horizon-client-input = { path = "../horizon-client-input" }
+# horizon-client-input: sin la feature "controllers" para evitar hidapi/libudev en Android.
+horizon-client-input = { path = "../horizon-client-input", default-features = false }
 horizon-client-render = { path = "../horizon-client-render" }
 jni = "0.21"
 ndk = { version = "0.9", default-features = false }
@@ -20,6 +21,7 @@ ndk-sys = "0.6"
 raw-window-handle = "0.6"
 log = "0.4"
 android_logger = "0.14"
+android-activity = { version = "0.6.1", default-features = false, features = ["native-activity"] }
 
 [lints]
 workspace = true

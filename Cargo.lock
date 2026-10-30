@@ -1105,6 +1105,7 @@ dependencies = [
 name = "horizon-android"
 version = "0.1.0"
 dependencies = [
+ "android-activity",
  "android_logger",
  "horizon-client-core",
  "horizon-client-input",
