@@ -39,6 +39,7 @@
 //! Entregas futuras (C+) expandirán el bucle para invocar la lógica de juego.
 
 pub mod hud;
+pub mod screens;
 pub mod storage;
 pub mod touch;
 
@@ -135,6 +136,19 @@ mod engine {
         let mut touch_bridge = touch::TouchBridge::new();
 
         let mut hud_renderer: Option<hud::HudRenderer> = None;
+        let mut screen_renderer: Option<screens::render::ScreenRenderer> = None;
+        let mut screen_manager: Option<screens::ScreenManager> = None;
+
+        let mut storage = match ENGINE.lock() {
+            Ok(s) => s.storage.clone(),
+            Err(_) => None,
+        }
+        .unwrap_or_else(|| {
+            storage::StorageManager::new(
+                PathBuf::from("/data/data/net.bycesardev.horizon/files"),
+                PathBuf::from("/data/data/net.bycesardev.horizon/files/resources"),
+            )
+        });
 
         let mut frame_count: u64 = 0;
 
@@ -293,6 +307,26 @@ mod engine {
                         ));
                     }
 
+                    if screen_renderer.is_none() {
+                        log::info!("Initializing ScreenRenderer ({width}x{height})...");
+                        screen_renderer = Some(screens::render::ScreenRenderer::new(
+                            &device,
+                            &queue,
+                            format,
+                            width as f32,
+                            height as f32,
+                        ));
+                    }
+
+                    if screen_manager.is_none() {
+                        log::info!("Initializing ScreenManager ({width}x{height})...");
+                        screen_manager = Some(screens::ScreenManager::new(
+                            width as f32,
+                            height as f32,
+                            &storage,
+                        ));
+                    }
+
                     gpu_resources = Some((adapter, device, queue, config));
                 } else if let Some((_, ref device, _, ref mut config)) = gpu_resources {
                     config.width = width;
@@ -304,22 +338,51 @@ mod engine {
                 current_surface = Some(surface);
             }
 
-            // Drenar y procesar cola táctil de Android (Entrega E)
+            // Drenar y procesar cola táctil de Android (Entrega E + Screens)
             let mut pending_touches = Vec::new();
             if let Ok(mut state) = ENGINE.lock() {
                 std::mem::swap(&mut state.touch_queue, &mut pending_touches);
             }
+
+            let is_playing = screen_manager
+                .as_ref()
+                .map_or(false, |m| m.current_state().is_playing());
+
             for (pointer_id, action, x, y) in pending_touches {
-                touch_manager.on_touch(pointer_id, action, x, y);
+                if !is_playing {
+                    if let Some(mgr) = &mut screen_manager {
+                        mgr.handle_touch(action, x, y, &mut storage);
+                    }
+                } else {
+                    touch_manager.on_touch(pointer_id, action, x, y);
+                }
             }
-            let touch_actions = touch_manager.update();
+
+            let touch_actions = if is_playing {
+                let actions = touch_manager.update();
+                if actions.toggle_pause {
+                    if let Some(mgr) = &mut screen_manager {
+                        mgr.pause(&storage);
+                    }
+                }
+                if let Some(mgr) = &mut screen_manager {
+                    mgr.player_yaw = (mgr.player_yaw + actions.look_delta.0 * 0.4) % 360.0;
+                    mgr.player_pitch =
+                        (mgr.player_pitch + actions.look_delta.1 * 0.4).clamp(-85.0, 85.0);
+                }
+                actions
+            } else {
+                touch::TouchActionState::default()
+            };
+
             let game_events = touch_bridge.process_state(touch_actions);
 
-            if !game_events.key_changes.is_empty()
-                || !game_events.key_presses.is_empty()
-                || !game_events.mouse_changes.is_empty()
-                || game_events.use_click
-                || game_events.look_delta != (0.0, 0.0)
+            if is_playing
+                && (!game_events.key_changes.is_empty()
+                    || !game_events.key_presses.is_empty()
+                    || !game_events.mouse_changes.is_empty()
+                    || game_events.use_click
+                    || game_events.look_delta != (0.0, 0.0))
             {
                 log::info!(
                     "GameEvent: keys={:?}, presses={:?}, mouse={:?}, use={}, look=({:.1},{:.1})",
@@ -343,6 +406,12 @@ mod engine {
                         touch_manager.resize(width as f32, height as f32);
                         if let Some(hud) = &mut hud_renderer {
                             hud.resize(width as f32, height as f32);
+                        }
+                        if let Some(scr) = &mut screen_renderer {
+                            scr.resize(width as f32, height as f32);
+                        }
+                        if let Some(mgr) = &mut screen_manager {
+                            mgr.resize(width as f32, height as f32, &storage);
                         }
                     }
 
@@ -373,58 +442,22 @@ mod engine {
                             .create_view(&wgpu::TextureViewDescriptor::default());
                         let mut encoder =
                             device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("Horizon Clear Encoder"),
+                                label: Some("Horizon Screen Encoder"),
                             });
 
-                        // Color temático Horizon con respuesta visual interactiva a toques
-                        let phase = (frame_count as f64 * 0.03).sin() * 0.03;
-                        let mut r = 0.12 + phase;
-                        let mut g = 0.25 + phase;
-                        let mut b = 0.45 + phase;
-
-                        // Modulación de color para validar en pantalla cada acción táctil
-                        if touch_actions.move_direction != [0.0, 0.0] {
-                            // D-pad activo: tono esmeralda
-                            g += 0.22;
-                        }
-                        if touch_actions.jump {
-                            // Salto activo: iluminación brillante
-                            r += 0.2;
-                            g += 0.2;
-                            b += 0.2;
-                        }
-                        if touch_actions.sneak {
-                            // Agachado: tono sigiloso oscuro
-                            r *= 0.5;
-                            g *= 0.5;
-                            b *= 0.5;
-                        }
-                        if touch_actions.attack {
-                            // Toque prolongado (minar/atacar): tono rubí
-                            r += 0.35;
-                        }
-                        if touch_actions.use_item {
-                            // Tap simple (usar/colocar): destello dorado
-                            r += 0.25;
-                            g += 0.25;
-                        }
-                        if touch_actions.look_delta != (0.0, 0.0) {
-                            // Deslizamiento de cámara: tono zafiro
-                            b += 0.25;
-                        }
-
+                        // Clear inicial
                         {
                             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("Horizon Clear Pass"),
+                                label: Some("Horizon Background Clear Pass"),
                                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                                     view: &view,
                                     resolve_target: None,
                                     depth_slice: None,
                                     ops: wgpu::Operations {
                                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                                            r: r.clamp(0.0, 1.0),
-                                            g: g.clamp(0.0, 1.0),
-                                            b: b.clamp(0.0, 1.0),
+                                            r: 0.08,
+                                            g: 0.08,
+                                            b: 0.08,
                                             a: 1.0,
                                         }),
                                         store: wgpu::StoreOp::Store,
@@ -437,9 +470,18 @@ mod engine {
                             });
                         }
 
-                        // Dibujar el HUD táctil de PocketMC encima del fondo
-                        if let Some(hud) = &hud_renderer {
-                            hud.draw(queue, &view, &mut encoder, &touch_manager.input);
+                        // 1. Dibujar la pantalla actual (MainMenu, SelectWorld, CreateWorld, Options, Paused, o Playing)
+                        if let (Some(mgr), Some(scr)) = (&screen_manager, &mut screen_renderer) {
+                            scr.clear_batch();
+                            mgr.draw(scr, &storage, frame_count);
+                            scr.flush(queue, &view, &mut encoder);
+                        }
+
+                        // 2. Si está en juego activo (Playing): dibujar el HUD táctil de PocketMC encima
+                        if is_playing {
+                            if let Some(hud) = &hud_renderer {
+                                hud.draw(queue, &view, &mut encoder, &touch_manager.input);
+                            }
                         }
 
                         queue.submit(std::iter::once(encoder.finish()));
