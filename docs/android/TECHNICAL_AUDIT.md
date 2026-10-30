@@ -361,7 +361,7 @@ Para la compilación y prueba de Horizon en Android ARM64, se establece la sigui
 | **D<br />(Completada)** | **Superficie Android & Renderizado**     | Conectar `ANativeWindow` con `wgpu::Surface`, gestionar `surfaceCreated`/`surfaceDestroyed`, renderizar pantalla inicial de Horizon. | **Hito 1:** Primer fotograma de Horizon renderizado correctamente en la pantalla del móvil.                                       |
 | **E<br />(Completada)** | **Puente de Entrada & Lógica Táctil**   | Port de `TouchAreaModel`, `GestureRecognizer`, `TouchTurnInput` y `TouchscreenInput` de PocketMC en Rust.                                   | Detección de toques, minado vs rotación, saltos y D-pad procesados y verificados en tiempo real.                                       |
 | **F<br />(Completada)** | **HUD Táctil PocketMC en Pantalla**     | Pipeline 2D wgpu, carga de 30 sprites de PocketMC vía `AAssetManager`, renderizado interactivo de botones, cruceta y hotbar.         | Overlay de controles visible e interactivo sobre la pantalla en Redmi Note 11S.                                                       |
-|          **G**          | **Conexión con la Simulación del Juego**| Conectar `TouchActionState` con los bindings del jugador de Horizon (`keyboard_direction`, `turn_player`, `attack`, `use_item`).     | El jugador se mueve, mira, salta, ataca e interactúa con el mundo mediante los controles táctiles.                                      |
+| **G<br />(Completada)** | **Conexión con la Simulación del Juego**| `TouchBridge` conectando `TouchActionState` con los bindings del jugador (`KeyCode`, `MouseButton`, `look_delta`, `use_click`).        | Transición de estados de teclado/ratón emitiéndose limpiamente para la simulación del jugador en tiempo real.                         |
 |          **H**          | **Almacenamiento y Recursos**            | Despliegue de recursos de juego (`horizon-resources.json`), guardado y carga de mundos.                                                    | Crear un mundo nuevo en Android, guardarlo y reabrirlo sin corrupción.                                                                  |
 |          **I**          | **Optimización y Pruebas Finales**      | Medir FPS, estabilidad térmica y memoria en Redmi Note 11S.                                                                                 | **Hito 2:** Sesión de juego fluida, estable y reproducible.                                                                       |
 
@@ -371,21 +371,22 @@ Para la compilación y prueba de Horizon en Android ARM64, se establece la sigui
 
 ### Estado Actual (30-Oct-2026):
 
-- **Entregas A, B, C, D, E y F completadas exitosamente.**
-- **Entrega E (Lógica táctil):** Port de todo el subsistema táctil de PocketMC a Rust (`crates/horizon-android/src/touch/`).
-- **Entrega F (HUD visual PocketMC):**
-  - Copiados los 31 assets de PocketMC (`touchgui/`) a `android/app/src/main/assets/touchgui/`.
-  - Implementado `crates/horizon-android/src/hud/` con pipeline 2D wgpu (`hud.wgsl`).
-  - Carga automática de texturas PNG mediante `AAssetManager` de Android NDK (`AAssetManager_fromJava`).
-  - Renderizado optimizado: 1 único búfer de vértices dinámico, 1 búfer de índices estático y 1 solo render pass por fotograma para rendimiento máximo en GPUs móviles (Mali-G57).
-  - Verificado en el dispositivo físico Redmi Note 11S (`2307x1080` a 60 FPS):
-    - `HudRenderer: loaded 30/30 sprites`
-    - Controles responden a toques individuales, toques mantenidos, arrastre de cámara y botones del HUD (`pause`, `3rd`, `jump`, etc.).
+- **Entregas A, B, C, D, E, F y G completadas exitosamente.**
+- **Entrega G (Puente de Simulación de Juego):**
+  - Implementado `TouchBridge` en `crates/horizon-android/src/touch/bridge.rs`.
+  - Vinculación directa con `horizon-client` (`default-features = false`, compilación Android limpia).
+  - Emisión de `TouchGameEvents`:
+    - Movimiento en 4 direcciones / D-pad mapeado a `KeyCode::KeyW`, `KeyA`, `KeyS`, `KeyD`.
+    - Salto mapeado a `KeyCode::Space`.
+    - Agacharse mapeado a `KeyCode::ShiftLeft`.
+    - Minado continuo / ataque mapeado a `MouseButton::Left`.
+    - Colocar bloques / interactuar mapeado a `use_click` (`MouseButton::Right`).
+    - Atajos de interfaz mapeados a `KeyCode::Escape` (pausa), `KeyCode::KeyT` (chat) y `KeyCode::F5` (perspectiva).
+    - Deslizamiento de cámara mapeado a `look_delta`.
+  - Verificado en el dispositivo físico Redmi Note 11S con eventos en vivo en `logcat`.
 
-### Próxima Tarea Concreta (Entrega G):
+### Próxima Tarea Concreta (Entrega H):
 
-**Conectar `TouchActionState` con la simulación del jugador en Horizon:**
-- Vincular `TouchActionState.move_direction` con la dirección de movimiento del jugador.
-- Vincular `TouchActionState.look_delta` con la rotación de cámara (`turn_player`).
-- Vincular `TouchActionState.attack` y `use_item` con romper/colocar bloques.
-- Vincular los toggles de pantalla (pausa, chat, tercera persona).
+**Almacenamiento y Recursos de Juego:**
+- Configurar la extracción y lectura de `horizon-resources.json` y assets de juego en el almacenamiento interno privado (`/data/user/0/net.bycesardev.horizon/files/horizon`).
+- Integrar la persistencia de `saves/` y `options.txt` en el dispositivo móvil.

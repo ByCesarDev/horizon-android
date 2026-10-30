@@ -1114,6 +1114,7 @@ dependencies = [
  "android-activity",
  "android_logger",
  "bytemuck",
+ "horizon-client",
  "horizon-client-core",
  "horizon-client-input",
  "horizon-client-render",
@@ -1126,6 +1127,7 @@ dependencies = [
  "pollster",
  "raw-window-handle",
  "wgpu",
+ "winit",
 ]
 
 [[package]]

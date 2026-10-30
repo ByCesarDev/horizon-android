@@ -1,11 +1,13 @@
 //! Touch controls ported from PocketMC for Horizon on Android.
 
 pub mod area;
+pub mod bridge;
 pub mod gesture;
 pub mod input;
 pub mod turn;
 
 pub use area::{RectangleArea, TouchAreaModel};
+pub use bridge::{TouchBridge, TouchGameEvents};
 pub use gesture::{GestureOutput, GestureRecognizer};
 pub use input::{TouchOptions, TouchscreenInput};
 pub use turn::{TouchTurnInput, TurnDelta};

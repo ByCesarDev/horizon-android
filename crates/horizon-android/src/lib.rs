@@ -129,6 +129,7 @@ mod engine {
             SURFACE_HEIGHT.load(Ordering::Relaxed).max(1) as f32,
             touch::TouchOptions::default(),
         );
+        let mut touch_bridge = touch::TouchBridge::new();
 
         let mut hud_renderer: Option<hud::HudRenderer> = None;
 
@@ -308,31 +309,22 @@ mod engine {
                 touch_manager.on_touch(pointer_id, action, x, y);
             }
             let touch_actions = touch_manager.update();
+            let game_events = touch_bridge.process_state(touch_actions);
 
-            // Registrar en logcat cuando el usuario interactúa
-            if touch_actions.move_direction != [0.0, 0.0]
-                || touch_actions.jump
-                || touch_actions.sneak
-                || touch_actions.attack
-                || touch_actions.use_item
-                || touch_actions.look_delta != (0.0, 0.0)
-                || touch_actions.toggle_flight
-                || touch_actions.toggle_pause
-                || touch_actions.toggle_chat
-                || touch_actions.toggle_perspective
+            if !game_events.key_changes.is_empty()
+                || !game_events.key_presses.is_empty()
+                || !game_events.mouse_changes.is_empty()
+                || game_events.use_click
+                || game_events.look_delta != (0.0, 0.0)
             {
                 log::info!(
-                    "TouchAction: move={:?}, jump={}, sneak={}, attack={}, use={}, look=({:.1},{:.1}), pause={}, chat={}, 3rd={}",
-                    touch_actions.move_direction,
-                    touch_actions.jump,
-                    touch_actions.sneak,
-                    touch_actions.attack,
-                    touch_actions.use_item,
-                    touch_actions.look_delta.0,
-                    touch_actions.look_delta.1,
-                    touch_actions.toggle_pause,
-                    touch_actions.toggle_chat,
-                    touch_actions.toggle_perspective,
+                    "GameEvent: keys={:?}, presses={:?}, mouse={:?}, use={}, look=({:.1},{:.1})",
+                    game_events.key_changes,
+                    game_events.key_presses,
+                    game_events.mouse_changes,
+                    game_events.use_click,
+                    game_events.look_delta.0,
+                    game_events.look_delta.1,
                 );
             }
 

@@ -15,6 +15,7 @@ horizon-client-core = { path = "../horizon-client-core" }
 # horizon-client-input: sin la feature "controllers" para evitar hidapi/libudev en Android.
 horizon-client-input = { path = "../horizon-client-input", default-features = false }
 horizon-client-render = { path = "../horizon-client-render" }
+horizon-client = { path = "../horizon-client", default-features = false }
 jni = "0.21"
 ndk = { version = "0.9", default-features = false }
 ndk-sys = "0.6"
@@ -26,6 +27,7 @@ wgpu = { version = "30.0.1", default-features = false, features = ["std", "parki
 pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 bytemuck = { version = "1.24", features = ["derive"] }
+winit = "0.30.13"
 
 [lints]
 workspace = true
