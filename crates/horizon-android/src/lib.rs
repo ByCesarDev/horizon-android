@@ -90,47 +90,37 @@ static ENGINE: Mutex<EngineState> = Mutex::new(EngineState {
     touch_queue: Vec::new(),
 });
 
-// ── Módulo del motor (game loop Android) ─────────────────────────────────────
+// ── Módulo del motor (game loop Android con wgpu) ───────────────────────────
 
 mod engine {
     use super::*;
+    use std::ptr::NonNull;
 
     /// Punto de entrada del game thread.
     ///
-    /// Por ahora implementa un bucle de espera-activa mínimo que:
-    /// 1. Espera hasta que la superficie esté disponible.
-    /// 2. Registra la inicialización exitosa del motor en logcat.
-    /// 3. Entra en el bucle principal: duerme mientras pausado, sale en SHUTDOWN.
-    ///
-    /// Entregas D+ sustituirán este stub por la inicialización real de wgpu
-    /// y el game loop de Horizon.
+    /// Entrega D: Inicializa wgpu (Vulkan / GLES), crea una superficie wgpu::Surface
+    /// a partir del ANativeWindow proporcionado por SurfaceHolder, adquiere Adapter/Device/Queue,
+    /// y ejecuta el bucle de renderizado presentando los primeros frames gráficos en pantalla.
     pub fn run() {
         log::info!("Horizon game thread started");
 
-        // Fase 1: esperar la primera superficie (con timeout de 30 s).
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            if SHUTDOWN.load(Ordering::Acquire) {
-                log::info!("Horizon game thread: shutdown before surface — exiting");
-                return;
-            }
-            if SURFACE_READY.load(Ordering::Acquire) {
-                break;
-            }
-            if std::time::Instant::now() > deadline {
-                log::error!("Horizon game thread: timed out waiting for ANativeWindow");
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(16));
-        }
+        // 1. Inicializar la instancia wgpu
+        let backends = wgpu::Backends::VULKAN | wgpu::Backends::GL;
+        log::info!("Initializing wgpu::Instance with backends {backends:?}");
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = backends;
+        let instance = wgpu::Instance::new(descriptor);
 
-        let (w, h) = (
-            SURFACE_WIDTH.load(Ordering::Relaxed),
-            SURFACE_HEIGHT.load(Ordering::Relaxed),
-        );
-        log::info!("Horizon game thread: surface ready ({w}×{h}) — engine initialised");
+        let mut current_surface: Option<wgpu::Surface<'static>> = None;
+        let mut gpu_resources: Option<(
+            wgpu::Adapter,
+            wgpu::Device,
+            wgpu::Queue,
+            wgpu::SurfaceConfiguration,
+        )> = None;
 
-        // Fase 2: bucle principal (stub — Entrega D añadirá wgpu aquí).
+        let mut frame_count: u64 = 0;
+
         loop {
             if SHUTDOWN.load(Ordering::Acquire) {
                 log::info!("Horizon game thread: shutdown signal — exiting");
@@ -138,13 +128,233 @@ mod engine {
             }
 
             if PAUSED.load(Ordering::Acquire) || !SURFACE_READY.load(Ordering::Acquire) {
-                // Pausado o sin superficie: esperar sin consumir CPU.
+                // Si la superficie se destruyó, soltar el surface de wgpu
+                if !SURFACE_READY.load(Ordering::Acquire) && current_surface.is_some() {
+                    log::info!("Horizon game thread: surface destroyed, releasing wgpu::Surface");
+                    current_surface = None;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(32));
                 continue;
             }
 
-            // TODO (Entrega D): llamar al renderer de wgpu aquí.
-            // Por ahora simplemente dormimos 16 ms (≈ 60 fps stub).
+            let native_window_ptr = match ENGINE.lock() {
+                Ok(state) => state.native_window,
+                Err(_) => std::ptr::null_mut(),
+            };
+
+            if native_window_ptr.is_null() {
+                std::thread::sleep(std::time::Duration::from_millis(16));
+                continue;
+            }
+
+            let width = (SURFACE_WIDTH.load(Ordering::Relaxed) as u32).max(1);
+            let height = (SURFACE_HEIGHT.load(Ordering::Relaxed) as u32).max(1);
+
+            // Si aún no tenemos superficie creada para este ANativeWindow
+            if current_surface.is_none() {
+                log::info!(
+                    "Creating wgpu::Surface from ANativeWindow {:p} ({width}x{height})",
+                    native_window_ptr
+                );
+                let surface_target = wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: Some(raw_window_handle::RawDisplayHandle::Android(
+                        raw_window_handle::AndroidDisplayHandle::new(),
+                    )),
+                    raw_window_handle: raw_window_handle::RawWindowHandle::AndroidNdk(
+                        raw_window_handle::AndroidNdkWindowHandle::new(
+                            NonNull::new(native_window_ptr).expect("non-null ANativeWindow"),
+                        ),
+                    ),
+                };
+
+                let surface: wgpu::Surface<'static> =
+                    match unsafe { instance.create_surface_unsafe(surface_target) } {
+                        Ok(s) => s,
+                        Err(e) => {
+                            log::error!("Failed to create wgpu::Surface: {e}");
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            continue;
+                        }
+                    };
+
+                // Inicializar Adapter, Device y Queue si no se ha hecho
+                if gpu_resources.is_none() {
+                    log::info!("Requesting GPU adapter compatible with surface...");
+                    let adapter = match pollster::block_on(instance.request_adapter(
+                        &wgpu::RequestAdapterOptions {
+                            power_preference: wgpu::PowerPreference::HighPerformance,
+                            compatible_surface: Some(&surface),
+                            force_fallback_adapter: false,
+                            ..Default::default()
+                        },
+                    )) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            log::error!("No compatible GPU adapter found: {e}");
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            continue;
+                        }
+                    };
+
+                    let info = adapter.get_info();
+                    log::info!(
+                        "GPU Adapter: {} ({:?}, driver: {}, backend: {:?})",
+                        info.name,
+                        info.device_type,
+                        info.driver,
+                        info.backend
+                    );
+
+                    let limits = adapter.limits();
+                    let features = adapter.features()
+                        & (wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+                            | wgpu::Features::RG11B10UFLOAT_RENDERABLE);
+
+                    log::info!("Requesting device with adapter limits...");
+                    let (device, queue) = match pollster::block_on(adapter.request_device(
+                        &wgpu::DeviceDescriptor {
+                            label: Some("Horizon Android Device"),
+                            required_features: features,
+                            required_limits: limits,
+                            ..Default::default()
+                        },
+                    )) {
+                        Ok(dq) => dq,
+                        Err(e) => {
+                            log::error!("Failed to request device: {e}");
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            continue;
+                        }
+                    };
+
+                    let caps = surface.get_capabilities(&adapter);
+                    let format = caps
+                        .formats
+                        .iter()
+                        .copied()
+                        .find(|f| f.is_srgb())
+                        .unwrap_or(caps.formats[0]);
+                    let present_mode = caps
+                        .present_modes
+                        .iter()
+                        .copied()
+                        .find(|&m| m == wgpu::PresentMode::Fifo)
+                        .unwrap_or(caps.present_modes[0]);
+                    let alpha_mode = caps.alpha_modes[0];
+
+                    let config = wgpu::SurfaceConfiguration {
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        format,
+                        width,
+                        height,
+                        present_mode,
+                        desired_maximum_frame_latency: 2,
+                        alpha_mode,
+                        view_formats: vec![format],
+                        color_space: wgpu::SurfaceColorSpace::default(),
+                    };
+
+                    log::info!(
+                        "Configuring surface: {width}x{height}, format: {format:?}, present_mode: {present_mode:?}"
+                    );
+                    surface.configure(&device, &config);
+
+                    gpu_resources = Some((adapter, device, queue, config));
+                } else if let Some((_, ref device, _, ref mut config)) = gpu_resources {
+                    config.width = width;
+                    config.height = height;
+                    log::info!("Re-configuring existing device surface: {width}x{height}");
+                    surface.configure(device, config);
+                }
+
+                current_surface = Some(surface);
+            }
+
+            // Renderizar un frame
+            if let Some(surface) = &current_surface {
+                if let Some((_, device, queue, config)) = &mut gpu_resources {
+                    // Verificar si cambió el tamaño del viewport
+                    if config.width != width || config.height != height {
+                        config.width = width;
+                        config.height = height;
+                        surface.configure(device, config);
+                    }
+
+                    let (surface_texture, reconfigure) = match surface.get_current_texture() {
+                        wgpu::CurrentSurfaceTexture::Success(f) => (Some(f), false),
+                        wgpu::CurrentSurfaceTexture::Suboptimal(f) => (Some(f), true),
+                        wgpu::CurrentSurfaceTexture::Outdated => {
+                            surface.configure(device, config);
+                            (None, false)
+                        }
+                        wgpu::CurrentSurfaceTexture::Lost => {
+                            log::warn!("Surface lost, reconfiguring...");
+                            surface.configure(device, config);
+                            (None, false)
+                        }
+                        wgpu::CurrentSurfaceTexture::Timeout
+                        | wgpu::CurrentSurfaceTexture::Occluded => (None, false),
+                        wgpu::CurrentSurfaceTexture::Validation => {
+                            log::error!("Surface validation error, reconfiguring...");
+                            surface.configure(device, config);
+                            (None, false)
+                        }
+                    };
+
+                    if let Some(output) = surface_texture {
+                        let view = output
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+                        let mut encoder =
+                            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Horizon Clear Encoder"),
+                            });
+
+                        // Color temático Horizon (azul pizarra característico de interfaz inicial)
+                        // con leve oscilación suave para validar refresco interactivo en pantalla
+                        let phase = (frame_count as f64 * 0.03).sin() * 0.04;
+                        {
+                            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Horizon Clear Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &view,
+                                    resolve_target: None,
+                                    depth_slice: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                                            r: 0.12 + phase,
+                                            g: 0.25 + phase,
+                                            b: 0.45 + phase,
+                                            a: 1.0,
+                                        }),
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                                multiview_mask: None,
+                            });
+                        }
+
+                        queue.submit(std::iter::once(encoder.finish()));
+                        queue.present(output);
+
+                        if reconfigure {
+                            surface.configure(device, config);
+                        }
+
+                        frame_count += 1;
+                        if frame_count == 1 || frame_count % 300 == 0 {
+                            log::info!(
+                                "Rendered frame #{frame_count} on Android ({width}x{height})"
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Cadencia de refresco ≈ 60 fps
             std::thread::sleep(std::time::Duration::from_millis(16));
         }
 

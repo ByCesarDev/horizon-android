@@ -55,6 +55,7 @@ El renderizado se implementa en [`crates/horizon-client-render/src/gfx.rs`](file
 
 - **Estructura Principal:** [`struct Renderer`](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/crates/horizon-client-render/src/gfx.rs#L367) posee `instance`, `adapter`, `device`, `queue`, `surface` y los pipelines WGSL.
 - **Backends Gráficos:** [`backend_order`](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/crates/horizon-client-render/src/gfx.rs#L850) selecciona los backends según el sistema operativo:
+
   ```rust
   fn backend_order(api: GraphicsApi, os: &str, wgpu_backend: bool) -> Vec<wgpu::Backends> {
       // En Android (os == "android"), retorna:
@@ -64,9 +65,11 @@ El renderizado se implementa en [`crates/horizon-client-render/src/gfx.rs`](file
 
   Esto coincide a la perfección con Android: intenta inicializar Vulkan en primer lugar y, si el dispositivo no dispone de Vulkan conforme, recurre al backend OpenGL ES (EGL).
 - **Soporte Android en `third_party/wgpu-hal`:** La copia parcheada de `wgpu-hal` en el repositorio ya cuenta con código específico para Android:
+
   - Detección de versión de SDK mediante `android_system_properties`.
   - Integración con `ndk-sys` para swapchains nativos Vulkan sobre `ANativeWindow`.
 - **Creación de Superficie Actual:** Actualmente en [`open_backend`](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/crates/horizon-client-render/src/gfx.rs#L1030) se realiza:
+
   ```rust
   instance.create_surface(window.clone())
   ```
@@ -106,6 +109,7 @@ El renderizado se implementa en [`crates/horizon-client-render/src/gfx.rs`](file
   - Gamepad / Controlador: [`crates/horizon-client/src/game/pad.rs`](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/crates/horizon-client/src/game/pad.rs) gestiona el estado de mandos reales (vía `gilrs`) y emula mandos virtuales (`horizon-ctl pad`).
 - **Cómo llega la entrada al Jugador:**
   - En [`crates/horizon-client/src/game/remote.rs`](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/crates/horizon-client/src/game/remote.rs#L4260-L4277), las teclas se traducen al struct `Keys`:
+
     ```rust
     let keys = Keys {
         forward: held(KeyCode::KeyW),
@@ -120,6 +124,7 @@ El renderizado se implementa en [`crates/horizon-client-render/src/gfx.rs`](file
     ```
 
     Y luego se empaquetan en bits para el paquete vanilla `ServerboundPlayerInputPacket`:- Bit 0: Adelante (`forward`)
+
     - Bit 1: Atrás (`backward`)
     - Bit 2: Izquierda (`left`)
     - Bit 3: Derecha (`right`)
@@ -265,6 +270,7 @@ En [`crates/horizon-client/src/game.rs`](file:///c:/Users/Usuario/Desktop/Proyec
 - Caché de estructuras y biomas: `std::env::current_dir()?.join(".horizon-cache")`.
 - Servidores guardados: `std::env::current_dir()?.join("servers.dat")`.
 - **Estrategia en Android:** Durante la inicialización JNI en Rust, ejecutar:
+
   ```rust
   std::env::set_current_dir(&app_game_dir)?;
   ```
@@ -347,17 +353,17 @@ Para la compilación y prueba de Horizon en Android ARM64, se establece la sigui
 
 ## 10. Hoja de Ruta de Implementación Ordenada
 
-|      Fase / Entrega      | Objetivo Principal                             | Tareas Clave                                                                                                                                 | Criterio de Aceptación                                                                                                                  |
-| :----------------------: | :--------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| **A (Completada)** | **Auditoría Técnica**                  | Inspección de crates, dependencias, wgpu y PocketMC.                                                                                        | Documento [docs/android/TECHNICAL_AUDIT.md](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/docs/android/TECHNICAL_AUDIT.md) aprobado. |
-|       **B**       | **Proyecto Android & Compilación Rust** | Crear estructura `android/`, configurar Gradle, aislar `arboard` y compilar `libhorizon_android.so` para `aarch64-linux-android`.    | Compilación exitosa y generación de APK instalable en dispositivo real.                                                                |
-|       **C**       | **Inicialización JNI & Ciclo de Vida**  | Puente JNI, arranque del motor, gestión de paths (`game_home`, `current_dir`), manejo de pausa y suspensión.                           | La aplicación abre, ejecuta el log de Horizon en `logcat` e inicializa sin crashear.                                                  |
-|       **D**       | **Superficie Android & Renderizado**     | Conectar `ANativeWindow` con `wgpu::Surface`, gestionar `surfaceCreated`/`surfaceDestroyed`, renderizar pantalla inicial de Horizon. | **Hito 1:** Primer fotograma de Horizon renderizado correctamente en la pantalla del móvil.                                       |
-|       **E**       | **Puente de Entrada Multiplataforma**    | Diseñar la capa abstracta de eventos de puntero multitouch independiente de la UI.                                                          | Rust recibe eventos multitouch concurrentes con IDs de puntero estables.                                                                 |
-|       **F**       | **Port de Controles Táctiles PocketMC** | Implementar `TouchscreenInput`, `TouchAreaModel` y `UnifiedTurnBuild` en Rust.                                                         | D-pad, salto, agacharse, vuelo y discriminación de rotación vs minado funcionando.                                                     |
-|       **G**       | **HUD y Menús Adaptados**               | Escalar inventario, hotbar, chat y menús a pantallas táctiles.                                                                             | Navegación cómoda por inventarios y cofres mediante toques.                                                                            |
-|       **H**       | **Almacenamiento y Recursos**            | Despliegue de recursos de juego (`horizon-resources.json`), guardado y carga de mundos.                                                    | Crear un mundo nuevo en Android, guardarlo y reabrirlo sin corrupción.                                                                  |
-|       **I**       | **Optimización y Pruebas Finales**      | Medir FPS, estabilidad térmica y memoria en Redmi Note 11S.                                                                                 | **Hito 2:** Sesión de juego fluida, estable y reproducible.                                                                       |
+|        Fase / Entrega        | Objetivo Principal                             | Tareas Clave                                                                                                                                 | Criterio de Aceptación                                                                                                                  |
+| :---------------------------: | :--------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+|   **A (Completada)**   | **Auditoría Técnica**                  | Inspección de crates, dependencias, wgpu y PocketMC.                                                                                        | Documento [docs/android/TECHNICAL_AUDIT.md](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/docs/android/TECHNICAL_AUDIT.md) aprobado. |
+| **B<br />(Completada)** | **Proyecto Android & Compilación Rust** | Crear estructura `android/`, configurar Gradle, aislar `arboard` y compilar `libhorizon_android.so` para `aarch64-linux-android`.    | Compilación exitosa y generación de APK instalable en dispositivo real.                                                                |
+| **C<br />(Completada)** | **Inicialización JNI & Ciclo de Vida**  | Puente JNI, arranque del motor, gestión de paths (`game_home`, `current_dir`), manejo de pausa y suspensión.                           | La aplicación abre, ejecuta el log de Horizon en `logcat` e inicializa sin crashear.                                                  |
+|          **D**          | **Superficie Android & Renderizado**     | Conectar `ANativeWindow` con `wgpu::Surface`, gestionar `surfaceCreated`/`surfaceDestroyed`, renderizar pantalla inicial de Horizon. | **Hito 1:** Primer fotograma de Horizon renderizado correctamente en la pantalla del móvil.                                       |
+|          **E**          | **Puente de Entrada Multiplataforma**    | Diseñar la capa abstracta de eventos de puntero multitouch independiente de la UI.                                                          | Rust recibe eventos multitouch concurrentes con IDs de puntero estables.                                                                 |
+|          **F**          | **Port de Controles Táctiles PocketMC** | Implementar `TouchscreenInput`, `TouchAreaModel` y `UnifiedTurnBuild` en Rust.                                                         | D-pad, salto, agacharse, vuelo y discriminación de rotación vs minado funcionando.                                                     |
+|          **G**          | **HUD y Menús Adaptados**               | Escalar inventario, hotbar, chat y menús a pantallas táctiles.                                                                             | Navegación cómoda por inventarios y cofres mediante toques.                                                                            |
+|          **H**          | **Almacenamiento y Recursos**            | Despliegue de recursos de juego (`horizon-resources.json`), guardado y carga de mundos.                                                    | Crear un mundo nuevo en Android, guardarlo y reabrirlo sin corrupción.                                                                  |
+|          **I**          | **Optimización y Pruebas Finales**      | Medir FPS, estabilidad térmica y memoria en Redmi Note 11S.                                                                                 | **Hito 2:** Sesión de juego fluida, estable y reproducible.                                                                       |
 
 ---
 
@@ -382,16 +388,19 @@ Para la compilación y prueba de Horizon en Android ARM64, se establece la sigui
 ## 11.1 Estado Actualizado (30-Oct-2026)
 
 ### Entrega A - COMPLETADA
+
 - arboard ya aislada con cfg(not(target_os = "android")).
 - wgpu 30.0.1 + wgpu-hal tienen soporte Vulkan/GLES para Android.
 - Umbrales de gestos PocketMC documentados.
 
 ### Entrega B - COMPLETADA (Task 002)
+
 - crates/horizon-android: crate cdylib con JNI bridge completo.
 - android/: proyecto Gradle 8.5.2 + Kotlin 1.9, minSdk=24, arm64-v8a.
 - android/app/src/main/jniLibs/arm64-v8a/libhorizon_android.so: 88 MB generados.
 - Compilacion validada: cargo ndk --target aarch64-linux-android --platform 24 -o android/app/src/main/jniLibs build -p horizon-android --lib (11.65s).
 
 ### Proxima Tarea - Entrega C (Task 003)
+
 - Conectar motor Horizon al ciclo de vida Android (nativeInit lanza server thread, nativeOnPause/Resume, nativeOnDestroy limpia recursos).
 - Criterio: logcat muestra logs de Horizon al abrir la app sin SIGSEGV ni ANR.

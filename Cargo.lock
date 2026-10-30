@@ -1115,7 +1115,9 @@ dependencies = [
  "log",
  "ndk",
  "ndk-sys",
+ "pollster",
  "raw-window-handle",
+ "wgpu",
 ]
 
 [[package]]
