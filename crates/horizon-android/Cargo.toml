@@ -1,0 +1,25 @@
+[package]
+name = "horizon-android"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Android native library and JNI bridge for Horizon"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+horizon-core = { path = "../horizon-core" }
+horizon-client-core = { path = "../horizon-client-core" }
+horizon-client-input = { path = "../horizon-client-input" }
+horizon-client-render = { path = "../horizon-client-render" }
+jni = "0.21"
+ndk = { version = "0.9", default-features = false }
+ndk-sys = "0.6"
+raw-window-handle = "0.6"
+log = "0.4"
+android_logger = "0.14"
+
+[lints]
+workspace = true
