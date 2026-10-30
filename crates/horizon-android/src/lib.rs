@@ -39,6 +39,7 @@
 //! Entregas futuras (C+) expandirán el bucle para invocar la lógica de juego.
 
 pub mod hud;
+pub mod storage;
 pub mod touch;
 
 use std::ffi::c_void;
@@ -71,6 +72,7 @@ static SURFACE_HEIGHT: AtomicI32 = AtomicI32::new(0);
 struct EngineState {
     game_home: Option<PathBuf>,
     resources_dir: Option<PathBuf>,
+    storage: Option<storage::StorageManager>,
     /// Puntero crudo a `ANativeWindow`. Nulo cuando la superficie no existe.
     native_window: *mut c_void,
     /// Puntero a `AAssetManager` de Android para cargar assets de APK.
@@ -89,6 +91,7 @@ unsafe impl Sync for EngineState {}
 static ENGINE: Mutex<EngineState> = Mutex::new(EngineState {
     game_home: None,
     resources_dir: None,
+    storage: None,
     native_window: std::ptr::null_mut(),
     asset_manager: std::ptr::null_mut(),
     game_thread: None,
@@ -147,7 +150,8 @@ mod engine {
                     log::info!("Horizon game thread: surface destroyed, releasing wgpu::Surface");
                     current_surface = None;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(32));
+                // En segundo plano: dormir 100ms para consumir 0% de CPU
+                std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
             }
 
@@ -554,11 +558,19 @@ pub unsafe extern "C" fn Java_net_bycesardev_horizon_MainActivity_nativeInit(
     horizon_client_render::logging::init(&home_path, "Render thread");
     log::info!("Horizon {}", horizon_client_render::crash::version());
 
+    // Inicializar subsistema de almacenamiento (saves/, logs/, options.txt, resourcepacks/)
+    let storage = storage::StorageManager::new(home_path.clone(), res_path.clone());
+    let worlds = storage.list_worlds();
+    log::info!("nativeInit: found {} world(s) in saves/", worlds.len());
+    let has_resources = storage.check_resources();
+    log::info!("nativeInit: resources manifest available = {has_resources}");
+
     // Guardar paths en el estado compartido y lanzar el game thread.
     match ENGINE.lock() {
         Ok(mut state) => {
             state.game_home = Some(home_path);
             state.resources_dir = Some(res_path);
+            state.storage = Some(storage);
 
             // Lanzar el game thread sólo si aún no está corriendo.
             if state.game_thread.is_none() {
