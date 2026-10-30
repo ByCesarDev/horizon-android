@@ -38,6 +38,8 @@
 //!
 //! Entregas futuras (C+) expandirán el bucle para invocar la lógica de juego.
 
+pub mod touch;
+
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -118,6 +120,12 @@ mod engine {
             wgpu::Queue,
             wgpu::SurfaceConfiguration,
         )> = None;
+
+        let mut touch_manager = touch::TouchManager::new(
+            SURFACE_WIDTH.load(Ordering::Relaxed).max(1) as f32,
+            SURFACE_HEIGHT.load(Ordering::Relaxed).max(1) as f32,
+            touch::TouchOptions::default(),
+        );
 
         let mut frame_count: u64 = 0;
 
@@ -270,6 +278,43 @@ mod engine {
                 current_surface = Some(surface);
             }
 
+            // Drenar y procesar cola táctil de Android (Entrega E)
+            let mut pending_touches = Vec::new();
+            if let Ok(mut state) = ENGINE.lock() {
+                std::mem::swap(&mut state.touch_queue, &mut pending_touches);
+            }
+            for (pointer_id, action, x, y) in pending_touches {
+                touch_manager.on_touch(pointer_id, action, x, y);
+            }
+            let touch_actions = touch_manager.update();
+
+            // Registrar en logcat cuando el usuario interactúa
+            if touch_actions.move_direction != [0.0, 0.0]
+                || touch_actions.jump
+                || touch_actions.sneak
+                || touch_actions.attack
+                || touch_actions.use_item
+                || touch_actions.look_delta != (0.0, 0.0)
+                || touch_actions.toggle_flight
+                || touch_actions.toggle_pause
+                || touch_actions.toggle_chat
+                || touch_actions.toggle_perspective
+            {
+                log::info!(
+                    "TouchAction: move={:?}, jump={}, sneak={}, attack={}, use={}, look=({:.1},{:.1}), pause={}, chat={}, 3rd={}",
+                    touch_actions.move_direction,
+                    touch_actions.jump,
+                    touch_actions.sneak,
+                    touch_actions.attack,
+                    touch_actions.use_item,
+                    touch_actions.look_delta.0,
+                    touch_actions.look_delta.1,
+                    touch_actions.toggle_pause,
+                    touch_actions.toggle_chat,
+                    touch_actions.toggle_perspective,
+                );
+            }
+
             // Renderizar un frame
             if let Some(surface) = &current_surface {
                 if let Some((_, device, queue, config)) = &mut gpu_resources {
@@ -278,6 +323,7 @@ mod engine {
                         config.width = width;
                         config.height = height;
                         surface.configure(device, config);
+                        touch_manager.resize(width as f32, height as f32);
                     }
 
                     let (surface_texture, reconfigure) = match surface.get_current_texture() {
@@ -310,9 +356,43 @@ mod engine {
                                 label: Some("Horizon Clear Encoder"),
                             });
 
-                        // Color temático Horizon (azul pizarra característico de interfaz inicial)
-                        // con leve oscilación suave para validar refresco interactivo en pantalla
-                        let phase = (frame_count as f64 * 0.03).sin() * 0.04;
+                        // Color temático Horizon con respuesta visual interactiva a toques
+                        let phase = (frame_count as f64 * 0.03).sin() * 0.03;
+                        let mut r = 0.12 + phase;
+                        let mut g = 0.25 + phase;
+                        let mut b = 0.45 + phase;
+
+                        // Modulación de color para validar en pantalla cada acción táctil
+                        if touch_actions.move_direction != [0.0, 0.0] {
+                            // D-pad activo: tono esmeralda
+                            g += 0.22;
+                        }
+                        if touch_actions.jump {
+                            // Salto activo: iluminación brillante
+                            r += 0.2;
+                            g += 0.2;
+                            b += 0.2;
+                        }
+                        if touch_actions.sneak {
+                            // Agachado: tono sigiloso oscuro
+                            r *= 0.5;
+                            g *= 0.5;
+                            b *= 0.5;
+                        }
+                        if touch_actions.attack {
+                            // Toque prolongado (minar/atacar): tono rubí
+                            r += 0.35;
+                        }
+                        if touch_actions.use_item {
+                            // Tap simple (usar/colocar): destello dorado
+                            r += 0.25;
+                            g += 0.25;
+                        }
+                        if touch_actions.look_delta != (0.0, 0.0) {
+                            // Deslizamiento de cámara: tono zafiro
+                            b += 0.25;
+                        }
+
                         {
                             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                                 label: Some("Horizon Clear Pass"),
@@ -322,9 +402,9 @@ mod engine {
                                     depth_slice: None,
                                     ops: wgpu::Operations {
                                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                                            r: 0.12 + phase,
-                                            g: 0.25 + phase,
-                                            b: 0.45 + phase,
+                                            r: r.clamp(0.0, 1.0),
+                                            g: g.clamp(0.0, 1.0),
+                                            b: b.clamp(0.0, 1.0),
                                             a: 1.0,
                                         }),
                                         store: wgpu::StoreOp::Store,
