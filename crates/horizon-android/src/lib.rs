@@ -38,6 +38,7 @@
 //!
 //! Entregas futuras (C+) expandirán el bucle para invocar la lógica de juego.
 
+pub mod hud;
 pub mod touch;
 
 use std::ffi::c_void;
@@ -72,15 +73,16 @@ struct EngineState {
     resources_dir: Option<PathBuf>,
     /// Puntero crudo a `ANativeWindow`. Nulo cuando la superficie no existe.
     native_window: *mut c_void,
+    /// Puntero a `AAssetManager` de Android para cargar assets de APK.
+    asset_manager: *mut ndk_sys::AAssetManager,
     /// Handle del game thread para hacer join en onDestroy.
     game_thread: Option<std::thread::JoinHandle<()>>,
     /// Cola de eventos táctiles: (pointer_id, action, x, y).
     touch_queue: Vec<(i32, i32, f32, f32)>,
 }
 
-// SAFETY: `native_window` es un puntero opaco gestionado exclusivamente por
-// los callbacks JNI serializados por el Mutex. El game thread sólo lo lee
-// cuando SURFACE_READY es true y lo accede también bajo el lock.
+// SAFETY: `native_window` y `asset_manager` son punteros opacos gestionados
+// exclusivamente por los callbacks JNI serializados por el Mutex.
 unsafe impl Send for EngineState {}
 unsafe impl Sync for EngineState {}
 
@@ -88,6 +90,7 @@ static ENGINE: Mutex<EngineState> = Mutex::new(EngineState {
     game_home: None,
     resources_dir: None,
     native_window: std::ptr::null_mut(),
+    asset_manager: std::ptr::null_mut(),
     game_thread: None,
     touch_queue: Vec::new(),
 });
@@ -126,6 +129,8 @@ mod engine {
             SURFACE_HEIGHT.load(Ordering::Relaxed).max(1) as f32,
             touch::TouchOptions::default(),
         );
+
+        let mut hud_renderer: Option<hud::HudRenderer> = None;
 
         let mut frame_count: u64 = 0;
 
@@ -267,6 +272,22 @@ mod engine {
                     );
                     surface.configure(&device, &config);
 
+                    if hud_renderer.is_none() {
+                        let asset_mgr = match ENGINE.lock() {
+                            Ok(s) => s.asset_manager,
+                            Err(_) => std::ptr::null_mut(),
+                        };
+                        log::info!("Initializing HudRenderer ({width}x{height})...");
+                        hud_renderer = Some(hud::HudRenderer::new(
+                            &device,
+                            &queue,
+                            format,
+                            width as f32,
+                            height as f32,
+                            asset_mgr,
+                        ));
+                    }
+
                     gpu_resources = Some((adapter, device, queue, config));
                 } else if let Some((_, ref device, _, ref mut config)) = gpu_resources {
                     config.width = width;
@@ -324,6 +345,9 @@ mod engine {
                         config.height = height;
                         surface.configure(device, config);
                         touch_manager.resize(width as f32, height as f32);
+                        if let Some(hud) = &mut hud_renderer {
+                            hud.resize(width as f32, height as f32);
+                        }
                     }
 
                     let (surface_texture, reconfigure) = match surface.get_current_texture() {
@@ -417,6 +441,11 @@ mod engine {
                             });
                         }
 
+                        // Dibujar el HUD táctil de PocketMC encima del fondo
+                        if let Some(hud) = &hud_renderer {
+                            hud.draw(queue, &view, &mut encoder, &touch_manager.input);
+                        }
+
                         queue.submit(std::iter::once(encoder.finish()));
                         queue.present(output);
 
@@ -443,6 +472,31 @@ mod engine {
 }
 
 // ── JNI Exports ──────────────────────────────────────────────────────────────
+
+/// **nativeSetAssetManager** — Proporciona el AssetManager de Android al motor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_net_bycesardev_horizon_MainActivity_nativeSetAssetManager(
+    env: JNIEnv,
+    _class: JClass,
+    asset_manager: JObject,
+) {
+    #[cfg(target_os = "android")]
+    {
+        use ndk_sys::AAssetManager_fromJava;
+        let env_raw = env.get_raw();
+        let obj_raw = asset_manager.as_raw();
+        let mgr = unsafe { AAssetManager_fromJava(env_raw as *mut _, obj_raw as *mut _) };
+        log::info!("nativeSetAssetManager: AAssetManager = {:p}", mgr);
+        if let Ok(mut state) = ENGINE.lock() {
+            state.asset_manager = mgr;
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (env, asset_manager);
+    }
+}
 
 /// **nativeInit** — Primer punto de entrada desde Kotlin.
 ///

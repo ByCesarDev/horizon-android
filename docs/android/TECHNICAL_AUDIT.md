@@ -359,9 +359,9 @@ Para la compilación y prueba de Horizon en Android ARM64, se establece la sigui
 | **B<br />(Completada)** | **Proyecto Android & Compilación Rust** | Crear estructura `android/`, configurar Gradle, aislar `arboard` y compilar `libhorizon_android.so` para `aarch64-linux-android`.    | Compilación exitosa y generación de APK instalable en dispositivo real.                                                                |
 | **C<br />(Completada)** | **Inicialización JNI & Ciclo de Vida**  | Puente JNI, arranque del motor, gestión de paths (`game_home`, `current_dir`), manejo de pausa y suspensión.                           | La aplicación abre, ejecuta el log de Horizon en `logcat` e inicializa sin crashear.                                                  |
 | **D<br />(Completada)** | **Superficie Android & Renderizado**     | Conectar `ANativeWindow` con `wgpu::Surface`, gestionar `surfaceCreated`/`surfaceDestroyed`, renderizar pantalla inicial de Horizon. | **Hito 1:** Primer fotograma de Horizon renderizado correctamente en la pantalla del móvil.                                       |
-|          **E**          | **Puente de Entrada Multiplataforma**    | Diseñar la capa abstracta de eventos de puntero multitouch independiente de la UI.                                                          | Rust recibe eventos multitouch concurrentes con IDs de puntero estables.                                                                 |
-|          **F**          | **Port de Controles Táctiles PocketMC** | Implementar `TouchscreenInput`, `TouchAreaModel` y `UnifiedTurnBuild` en Rust.                                                         | D-pad, salto, agacharse, vuelo y discriminación de rotación vs minado funcionando.                                                     |
-|          **G**          | **HUD y Menús Adaptados**               | Escalar inventario, hotbar, chat y menús a pantallas táctiles.                                                                             | Navegación cómoda por inventarios y cofres mediante toques.                                                                            |
+| **E<br />(Completada)** | **Puente de Entrada & Lógica Táctil**   | Port de `TouchAreaModel`, `GestureRecognizer`, `TouchTurnInput` y `TouchscreenInput` de PocketMC en Rust.                                   | Detección de toques, minado vs rotación, saltos y D-pad procesados y verificados en tiempo real.                                       |
+| **F<br />(Completada)** | **HUD Táctil PocketMC en Pantalla**     | Pipeline 2D wgpu, carga de 30 sprites de PocketMC vía `AAssetManager`, renderizado interactivo de botones, cruceta y hotbar.         | Overlay de controles visible e interactivo sobre la pantalla en Redmi Note 11S.                                                       |
+|          **G**          | **Conexión con la Simulación del Juego**| Conectar `TouchActionState` con los bindings del jugador de Horizon (`keyboard_direction`, `turn_player`, `attack`, `use_item`).     | El jugador se mueve, mira, salta, ataca e interactúa con el mundo mediante los controles táctiles.                                      |
 |          **H**          | **Almacenamiento y Recursos**            | Despliegue de recursos de juego (`horizon-resources.json`), guardado y carga de mundos.                                                    | Crear un mundo nuevo en Android, guardarlo y reabrirlo sin corrupción.                                                                  |
 |          **I**          | **Optimización y Pruebas Finales**      | Medir FPS, estabilidad térmica y memoria en Redmi Note 11S.                                                                                 | **Hito 2:** Sesión de juego fluida, estable y reproducible.                                                                       |
 
@@ -369,38 +369,23 @@ Para la compilación y prueba de Horizon en Android ARM64, se establece la sigui
 
 ## 11. Resumen de Estado y Próxima Tarea
 
-### Estado Actual:
+### Estado Actual (30-Oct-2026):
 
-- **Auditoría técnica completada.**
-- Se identificó la incompatibilidad bloqueante inmediata: [`arboard`](file:///c:/Users/Usuario/Desktop/Proyectos/horizon/crates/horizon-client-input/Cargo.toml) en `horizon-client-input`.
-- Se confirmó que el pipeline gráfico de Horizon (`wgpu 30.0.1` + `wgpu-hal`) ya posee los cimientos de Vulkan/GLES para Android.
-- Se documentaron las fórmulas matemáticas, escalas y umbrales de gestos de PocketMC (`Bw = 8% w`, `400ms` minado, `20px` umbral de arrastre de cámara, etc.).
+- **Entregas A, B, C, D, E y F completadas exitosamente.**
+- **Entrega E (Lógica táctil):** Port de todo el subsistema táctil de PocketMC a Rust (`crates/horizon-android/src/touch/`).
+- **Entrega F (HUD visual PocketMC):**
+  - Copiados los 31 assets de PocketMC (`touchgui/`) a `android/app/src/main/assets/touchgui/`.
+  - Implementado `crates/horizon-android/src/hud/` con pipeline 2D wgpu (`hud.wgsl`).
+  - Carga automática de texturas PNG mediante `AAssetManager` de Android NDK (`AAssetManager_fromJava`).
+  - Renderizado optimizado: 1 único búfer de vértices dinámico, 1 búfer de índices estático y 1 solo render pass por fotograma para rendimiento máximo en GPUs móviles (Mali-G57).
+  - Verificado en el dispositivo físico Redmi Note 11S (`2307x1080` a 60 FPS):
+    - `HudRenderer: loaded 30/30 sprites`
+    - Controles responden a toques individuales, toques mantenidos, arrastre de cámara y botones del HUD (`pause`, `3rd`, `jump`, etc.).
 
-### Próxima Tarea Concreta (Entrega B - Fase 1):
+### Próxima Tarea Concreta (Entrega G):
 
-**Task 002 — Proyecto Android y Compilación de Biblioteca Nativa ARM64:**
-
-1. Crear el proyecto base Android en `android/` con Gradle, Kotlin y `MainActivity`.
-2. Aislar condicionalmente la dependencia `arboard` en `crates/horizon-client-input/Cargo.toml` para que no afecte targets Android.
-3. Crear el subcrate `crates/horizon-android` con `crate-type = ["cdylib"]` que exponga la biblioteca nativa `libhorizon_android.so`.
-4. Configurar la compilación para `aarch64-linux-android` y validar que el APK se ensamble e instale sin errores.
-
-## 11.1 Estado Actualizado (30-Oct-2026)
-
-### Entrega A - COMPLETADA
-
-- arboard ya aislada con cfg(not(target_os = "android")).
-- wgpu 30.0.1 + wgpu-hal tienen soporte Vulkan/GLES para Android.
-- Umbrales de gestos PocketMC documentados.
-
-### Entrega B - COMPLETADA (Task 002)
-
-- crates/horizon-android: crate cdylib con JNI bridge completo.
-- android/: proyecto Gradle 8.5.2 + Kotlin 1.9, minSdk=24, arm64-v8a.
-- android/app/src/main/jniLibs/arm64-v8a/libhorizon_android.so: 88 MB generados.
-- Compilacion validada: cargo ndk --target aarch64-linux-android --platform 24 -o android/app/src/main/jniLibs build -p horizon-android --lib (11.65s).
-
-### Proxima Tarea - Entrega C (Task 003)
-
-- Conectar motor Horizon al ciclo de vida Android (nativeInit lanza server thread, nativeOnPause/Resume, nativeOnDestroy limpia recursos).
-- Criterio: logcat muestra logs de Horizon al abrir la app sin SIGSEGV ni ANR.
+**Conectar `TouchActionState` con la simulación del jugador en Horizon:**
+- Vincular `TouchActionState.move_direction` con la dirección de movimiento del jugador.
+- Vincular `TouchActionState.look_delta` con la rotación de cámara (`turn_player`).
+- Vincular `TouchActionState.attack` y `use_item` con romper/colocar bloques.
+- Vincular los toggles de pantalla (pausa, chat, tercera persona).

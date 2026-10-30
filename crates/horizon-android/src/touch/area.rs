@@ -80,5 +80,9 @@ impl TouchAreaModel {
     pub fn areas(&self) -> &[AreaEntry] {
         &self.areas
     }
+
+    pub fn get_area_rect(&self, area_id: i32) -> Option<&RectangleArea> {
+        self.areas.iter().find(|e| e.area_id == area_id).map(|e| &e.bounds)
+    }
 }
 

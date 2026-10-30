@@ -29,6 +29,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
         // Native JNI functions implemented in crates/horizon-android
         @JvmStatic
+        external fun nativeSetAssetManager(assetManager: Any)
+
+        @JvmStatic
         external fun nativeInit(internalDataDir: String, resourcesDir: String): Boolean
 
         @JvmStatic
@@ -67,6 +70,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         Log.i(TAG, "Internal data directory: ${internalDir.absolutePath}")
         Log.i(TAG, "Resources directory: ${resourcesDir.absolutePath}")
 
+        nativeSetAssetManager(assets)
         val success = nativeInit(internalDir.absolutePath, resourcesDir.absolutePath)
         Log.i(TAG, "nativeInit result: $success")
 
